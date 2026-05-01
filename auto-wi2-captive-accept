@@ -1,0 +1,343 @@
+#!/bin/zsh
+set -euo pipefail
+
+PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+APP_DIR="${HOME}/.local/share/auto-wi2-captive-accept"
+LOG_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.log"
+STATUS_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.status"
+LAST_PORTAL_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.last-url"
+LAST_REFRESH_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.last-refresh"
+TARGET_SSIDS=("DOUTOR_FREE_Wi-Fi" "at_STARBUCKS_Wi2" "Wi2_Free" "Wi2free" "Wi2")
+TARGET_HOSTS=("service.wi2.ne.jp")
+CAPTIVE_CHECK_URL="http://captive.apple.com/hotspot-detect.html"
+BROWSER_ACCEPT_HELPER="${APP_DIR}/auto-wi2-browser-accept.js"
+PORTAL_DETECTED=0
+PORTAL_LOCATION=""
+DIRECT_ACCEPTED=0
+
+timestamp() {
+  date "+%Y-%m-%d %H:%M:%S"
+}
+
+log() {
+  print -r -- "[$(timestamp)] $*" >> "${LOG_FILE}"
+}
+
+status() {
+  print -r -- "time=$(timestamp)"
+  print -r -- "ssid=${SSID:-unknown}"
+  print -r -- "result=$1"
+  if [[ $# -gt 1 ]]; then
+    print -r -- "detail=$2"
+  fi
+  return 0
+}
+
+write_status() {
+  status "$@" > "${STATUS_FILE}"
+}
+
+notify() {
+  local message="$1"
+  if command -v terminal-notifier >/dev/null 2>&1; then
+    terminal-notifier \
+      -title "Wi2 Wi-Fi auto-accept" \
+      -message "${message}" \
+      -sound default >/dev/null 2>&1 || true
+  else
+    osascript -e "display notification \"${message}\" with title \"Wi2 Wi-Fi auto-accept\"" >/dev/null 2>&1 || true
+  fi
+}
+
+captive_check_success() {
+  local body
+  body="$(mktemp -t auto-wi2-success.XXXXXX)"
+  if curl --silent --show-error --connect-timeout 3 --max-time 8 \
+    --output "${body}" \
+    "${CAPTIVE_CHECK_URL}" >/dev/null 2>&1 \
+    && grep -q "<BODY>Success</BODY>" "${body}"; then
+    rm -f "${body}"
+    return 0
+  fi
+  rm -f "${body}"
+  return 1
+}
+
+wifi_device() {
+  networksetup -listallhardwareports 2>/dev/null | awk '
+    /Hardware Port: Wi-Fi|Hardware Port: AirPort/ {
+      getline
+      if ($1 == "Device:") print $2
+    }
+  ' | head -n 1
+}
+
+current_ssid() {
+  local device
+  device="$(wifi_device)"
+  [[ -n "${device}" ]] || return 0
+  networksetup -getairportnetwork "${device}" 2>/dev/null \
+    | sed -E 's/^Current Wi-Fi Network: //; s/^You are not associated with an AirPort network\.//'
+}
+
+current_wifi_ip() {
+  local device
+  device="$(wifi_device)"
+  [[ -n "${device}" ]] || return 0
+  ifconfig "${device}" 2>/dev/null | awk '$1 == "inet" { print $2; exit }'
+}
+
+ssid_is_target() {
+  local ssid="$1"
+  local target
+  for target in "${TARGET_SSIDS[@]}"; do
+    [[ "${ssid}" == "${target}" ]] && return 0
+  done
+  return 1
+}
+
+network_is_possible_target() {
+  local ssid="$1"
+  local ip="$2"
+
+  if [[ -n "${ssid}" ]] && ssid_is_target "${ssid}"; then
+    return 0
+  fi
+
+  # Wi2 portals can hide the SSID from networksetup. Observed ranges:
+  # DOUTOR/Wi2: 10.68.x.x; Starbucks/Wi2: 10.18.x.x.
+  if [[ -z "${ssid}" && ( "${ip}" == 10.68.* || "${ip}" == 10.18.* ) ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+target_regex() {
+  local IFS="|"
+  print -r -- "DOUTOR_FREE_Wi-Fi|at_STARBUCKS_Wi2|Wi2 Free Wi-Fi Service|Free Wi-Fi|${TARGET_HOSTS[*]}"
+}
+
+open_portal_if_needed() {
+  local response_headers response_body location pattern
+  response_headers="$(mktemp -t auto-wi2-headers.XXXXXX)"
+  response_body="$(mktemp -t auto-wi2-body.XXXXXX)"
+  pattern="$(target_regex)"
+
+  if ! curl --silent --show-error --connect-timeout 3 --max-time 8 \
+    --dump-header "${response_headers}" \
+    --output "${response_body}" \
+    "${CAPTIVE_CHECK_URL}" >/dev/null 2>&1; then
+    rm -f "${response_headers}" "${response_body}"
+    return 0
+  fi
+
+  if ! grep -Eiq "${pattern}" "${response_headers}" "${response_body}"; then
+    rm -f "${response_headers}" "${response_body}"
+    return 0
+  fi
+
+  location="$(awk 'tolower($1) == "location:" { sub(/\r$/, "", $2); print $2; exit }' "${response_headers}")"
+  [[ -n "${location}" ]] || location="${CAPTIVE_CHECK_URL}"
+  PORTAL_DETECTED=1
+  PORTAL_LOCATION="${location}"
+  print -r -- "${location}" > "${LAST_PORTAL_FILE}"
+
+  write_status "portal_detected" "${location}"
+  log "Detected Wi2 captive portal redirect. Trying direct login. ssid=${SSID:-unknown} location=${location}"
+  notify "Detected Wi2 captive portal. Trying to accept it now."
+
+  if [[ -x "${BROWSER_ACCEPT_HELPER}" ]] && command -v node >/dev/null 2>&1; then
+    if browser_output="$(node "${BROWSER_ACCEPT_HELPER}" "${location}" 2>&1)"; then
+      sleep 3
+      if captive_check_success; then
+        DIRECT_ACCEPTED=1
+        log "Browser automation cleared Wi2 captive portal. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown} output=${browser_output}"
+        write_status "browser_accept_success" "${location}"
+        notify "Wi2 captive portal cleared by browser automation."
+        rm -f "${response_headers}" "${response_body}"
+        return 0
+      fi
+      log "Browser automation clicked but captive check still fails. ssid=${SSID:-unknown} output=${browser_output}"
+    else
+      log "Browser automation failed. ssid=${SSID:-unknown} output=${browser_output}"
+    fi
+  fi
+
+  if curl -L --silent --show-error --connect-timeout 3 --max-time 15 \
+    --cookie-jar /tmp/auto-wi2-cookies.txt \
+    --cookie /tmp/auto-wi2-cookies.txt \
+    --output /tmp/auto-wi2-direct-login.html \
+    "${location}" >/dev/null 2>&1; then
+    sleep 3
+    if captive_check_success; then
+      DIRECT_ACCEPTED=1
+      log "Direct Wi2 login cleared captive portal. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown}"
+      write_status "direct_login_success" "${location}"
+      notify "Wi2 captive portal cleared automatically."
+      rm -f "${response_headers}" "${response_body}"
+      return 0
+    fi
+  fi
+
+  log "Direct Wi2 login did not clear captive portal. Opening portal UI. ssid=${SSID:-unknown} location=${location}"
+  open -b "com.apple.CaptiveNetworkAssistant" "${location}" >/dev/null 2>&1 \
+    || open -a "Captive Network Assistant" "${location}" >/dev/null 2>&1 \
+    || open "${location}" >/dev/null 2>&1 \
+    || true
+
+  rm -f "${response_headers}" "${response_body}"
+  sleep 3
+}
+
+refresh_saved_login_if_due() {
+  local now last_refresh age location
+
+  [[ -f "${LAST_PORTAL_FILE}" ]] || return 0
+  location="$(cat "${LAST_PORTAL_FILE}" 2>/dev/null || true)"
+  [[ "${location}" == https://service.wi2.ne.jp/* ]] || return 0
+
+  now="$(date +%s)"
+  last_refresh="$(cat "${LAST_REFRESH_FILE}" 2>/dev/null || print 0)"
+  age=$((now - last_refresh))
+  [[ "${age}" -ge 1500 ]] || return 0
+
+  if curl -L --silent --show-error --connect-timeout 3 --max-time 12 \
+    --cookie-jar /tmp/auto-wi2-cookies.txt \
+    --cookie /tmp/auto-wi2-cookies.txt \
+    --output /tmp/auto-wi2-refresh.html \
+    "${location}" >/dev/null 2>&1; then
+    print -r -- "${now}" > "${LAST_REFRESH_FILE}"
+    log "Refreshed saved Wi2 login URL. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown}"
+    write_status "refreshed_saved_login" "${location}"
+  fi
+}
+
+SSID="$(current_ssid || true)"
+WIFI_IP="$(current_wifi_ip || true)"
+if ! network_is_possible_target "${SSID}" "${WIFI_IP}"; then
+  write_status "skipped_non_target_ssid"
+  exit 0
+fi
+
+if captive_check_success; then
+  if ! refresh_saved_login_if_due; then
+    true
+  fi
+  if [[ -f "${STATUS_FILE}" ]] && grep -q "result=refreshed_saved_login" "${STATUS_FILE}" 2>/dev/null; then
+    true
+  else
+    write_status "online_no_captive"
+  fi
+  exit 0
+fi
+
+open_portal_if_needed
+
+if [[ "${DIRECT_ACCEPTED}" == "1" ]]; then
+  exit 0
+fi
+
+if ! pgrep -x "Captive Network Assistant" >/dev/null 2>&1 \
+  && ! pgrep -x "CaptiveNetworkAssistant" >/dev/null 2>&1; then
+  if [[ "${PORTAL_DETECTED}" == "1" ]]; then
+    write_status "portal_detected_but_no_window" "${PORTAL_LOCATION}"
+    notify "Detected Wi2 captive portal, but no accept window appeared."
+  else
+    write_status "no_portal_window"
+  fi
+  exit 0
+fi
+
+export AUTO_WI2_PORTAL_DETECTED="${PORTAL_DETECTED}"
+RESULT="$(osascript <<'APPLESCRIPT'
+set clicked to false
+set matched to false
+set portalWasDetected to ((system attribute "AUTO_WI2_PORTAL_DETECTED") is "1")
+
+on textContainsAny(haystack, needles)
+  repeat with needle in needles
+    if haystack contains (needle as text) then return true
+  end repeat
+  return false
+end textContainsAny
+
+set targetNeedles to {"DOUTOR_FREE_Wi-Fi", "at_STARBUCKS_Wi2", "service.wi2.ne.jp", "Wi2 Free Wi-Fi Service", "Free Wi-Fi"}
+set buttonLabels to {"Accept", "Connect", "Agree", "同意する", "接続"}
+
+tell application "System Events"
+  repeat with passIndex from 1 to 3
+    set clickedThisPass to false
+    repeat with processName in {"Captive Network Assistant", "CaptiveNetworkAssistant"}
+      set processNameText to processName as text
+      if exists process processNameText then
+        tell process processNameText
+          repeat with windowRef in windows
+            set windowText to ""
+            try
+              set windowText to name of windowRef as text
+            end try
+
+            set titleMatched to my textContainsAny(windowText, targetNeedles)
+            if titleMatched or portalWasDetected then
+              set matched to true
+              repeat with buttonLabel in buttonLabels
+                if clickedThisPass is false then
+                  try
+                    click button (buttonLabel as text) of windowRef
+                    set clicked to true
+                    set clickedThisPass to true
+                  end try
+                end if
+              end repeat
+              if clickedThisPass is false then
+                try
+                  set windowPosition to position of windowRef
+                  set windowSize to size of windowRef
+                  set clickX to (item 1 of windowPosition) + ((item 1 of windowSize) * 0.575)
+                  set clickY to (item 2 of windowPosition) + ((item 2 of windowSize) * 0.76)
+                  click at {clickX as integer, clickY as integer}
+                  set clicked to true
+                  set clickedThisPass to true
+                end try
+              end if
+            end if
+          end repeat
+        end tell
+      end if
+    end repeat
+    if clickedThisPass then delay 2
+  end repeat
+end tell
+
+if clicked then
+  return "clicked"
+else if matched then
+  return "matched_no_button"
+else
+  return "no_match"
+end if
+APPLESCRIPT
+)"
+
+case "${RESULT}" in
+  clicked)
+    sleep 4
+    if captive_check_success; then
+      log "Clicked Accept for Wi2 captive portal and captive check now passes. ssid=${SSID:-unknown}"
+      write_status "clicked_accept_success"
+      notify "Clicked Accept for ${SSID:-Wi2 captive portal}; network check passes."
+    else
+      log "Clicked Accept for Wi2 captive portal but captive check still fails. ssid=${SSID:-unknown}"
+      write_status "clicked_accept_still_captive"
+      notify "Clicked Accept for ${SSID:-Wi2 captive portal}, but network still looks captive."
+    fi
+    ;;
+  matched_no_button)
+    log "Matched Wi2 captive portal but no Accept button was available. ssid=${SSID:-unknown}"
+    write_status "matched_no_button"
+    ;;
+  *)
+    write_status "${RESULT}"
+    ;;
+esac
