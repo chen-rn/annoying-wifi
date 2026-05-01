@@ -14,7 +14,17 @@ const AGENT_PROMPT = `Install auto-wi2-captive-accept on this Mac.
 
 It runs every 30 seconds, detects Wi2 captive portals (DOUTOR, Starbucks, Wi2 Free), and auto-accepts them in headless Chromium. Designed for DOUTOR_FREE_Wi-Fi and at_STARBUCKS_Wi2; other Wi2 SSIDs may or may not work.`;
 
-export function CopyAgentPrompt() {
+type Props = {
+  children: React.ReactNode;
+  copiedLabel?: React.ReactNode;
+  className?: string;
+};
+
+export function CopyAgentPrompt({
+  children,
+  copiedLabel = "Copied",
+  className = "action-link",
+}: Props) {
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
@@ -23,14 +33,13 @@ export function CopyAgentPrompt() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch {
-      // clipboard blocked — fall back to selecting the text
       window.prompt("Copy the prompt below:", AGENT_PROMPT);
     }
   }
 
   return (
-    <button type="button" className="action-link" onClick={handleCopy}>
-      {copied ? "Copied" : "Copy install prompt for your agent"}
+    <button type="button" className={className} onClick={handleCopy}>
+      {copied ? copiedLabel : children}
     </button>
   );
 }

@@ -1,28 +1,75 @@
 import { CopyAgentPrompt } from "./CopyAgentPrompt";
 
 const REPO_URL = "https://github.com/chen-rn/auto-wi2-captive-accept";
-const ZIP_URL = `${REPO_URL}/archive/refs/heads/main.zip`;
 
 export default function Home() {
   return (
-    <main className="page">
-      <section className="block">
-        <p className="lede">
-          A macOS background script that auto-accepts Wi2 captive portals, so
-          your Mac just connects.
-        </p>
+    <main className="page page-spec theme-divided">
+      <article className="paper">
+        <header className="paper-head">
+          <h1>wi2-auto-accept</h1>
+          <span className="paper-meta">macOS · LaunchAgent · Playwright</span>
+        </header>
 
-        <div className="actions">
-          <a className="action-link" href={ZIP_URL}>
-            Download
-          </a>
-          <CopyAgentPrompt />
-        </div>
+        <section className="paper-body">
+          <p>
+            Wi2 captive portals (Starbucks, DOUTOR) kick you off every 60
+            minutes. This is a small background script that clicks through the
+            portal for you, so the disconnect is invisible.
+          </p>
+          <p>
+            It runs every 30 seconds, detects the portal via Apple&apos;s
+            hotspot probe, and uses a headless Chromium to tap the right
+            buttons.
+          </p>
+        </section>
 
-        <p className="note">
-          Works for DOUTOR and Starbucks. No guarantees elsewhere.
-        </p>
-      </section>
+        <section className="paper-row">
+          <span className="row-key">supports</span>
+          <span className="row-val">
+            <code>DOUTOR_FREE_Wi-Fi</code>
+            <code>at_STARBUCKS_Wi2</code>
+          </span>
+        </section>
+
+        <section className="paper-row">
+          <span className="row-key">install</span>
+          <span className="row-val">
+            <CopyAgentPrompt className="inline-link" copiedLabel="Copied">
+              copy prompt for your agent
+            </CopyAgentPrompt>
+          </span>
+        </section>
+
+        <section className="paper-row">
+          <span className="row-key">source</span>
+          <span className="row-val">
+            <a
+              className="inline-link"
+              href={REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              github.com/chen-rn/auto-wi2-captive-accept
+            </a>
+          </span>
+        </section>
+
+        <section className="paper-row">
+          <span className="row-key">contribute</span>
+          <span className="row-val">
+            another network?{" "}
+            <a
+              className="inline-link"
+              href={REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              send a PR
+            </a>
+          </span>
+        </section>
+      </article>
     </main>
   );
 }
