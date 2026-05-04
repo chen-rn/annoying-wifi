@@ -14,6 +14,7 @@ BROWSER_ACCEPT_HELPER="${APP_DIR}/auto-wi2-browser-accept.js"
 PORTAL_DETECTED=0
 PORTAL_LOCATION=""
 DIRECT_ACCEPTED=0
+REFRESHED_SAVED_LOGIN=0
 
 timestamp() {
   date "+%Y-%m-%d %H:%M:%S"
@@ -133,11 +134,13 @@ open_portal_if_needed() {
   fi
 
   if ! grep -Eiq "${pattern}" "${response_headers}" "${response_body}"; then
-    rm -f "${response_headers}" "${response_body}"
-    return 0
+    log "Captive check failed on target-like Wi2 network but response did not match known portal markers. Trying portal flow anyway. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown}"
   fi
 
   location="$(awk 'tolower($1) == "location:" { sub(/\r$/, "", $2); print $2; exit }' "${response_headers}")"
+  if [[ -z "${location}" ]]; then
+    location="$(grep -Eho 'https?://[^"<>[:space:]]+' "${response_headers}" "${response_body}" 2>/dev/null | grep -m 1 'service\.wi2\.ne\.jp' || true)"
+  fi
   [[ -n "${location}" ]] || location="${CAPTIVE_CHECK_URL}"
   PORTAL_DETECTED=1
   PORTAL_LOCATION="${location}"
@@ -196,6 +199,10 @@ refresh_saved_login_if_due() {
   [[ -f "${LAST_PORTAL_FILE}" ]] || return 0
   location="$(cat "${LAST_PORTAL_FILE}" 2>/dev/null || true)"
   [[ "${location}" == https://service.wi2.ne.jp/* ]] || return 0
+  if [[ -n "${WIFI_IP:-}" && "${location}" == *"ip="* && "${location}" != *"ip=${WIFI_IP}"* ]]; then
+    log "Skipping stale saved Wi2 login URL for a different IP. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown} location=${location}"
+    return 0
+  fi
 
   now="$(date +%s)"
   last_refresh="$(cat "${LAST_REFRESH_FILE}" 2>/dev/null || print 0)"
@@ -208,6 +215,7 @@ refresh_saved_login_if_due() {
     --output /tmp/auto-wi2-refresh.html \
     "${location}" >/dev/null 2>&1; then
     print -r -- "${now}" > "${LAST_REFRESH_FILE}"
+    REFRESHED_SAVED_LOGIN=1
     log "Refreshed saved Wi2 login URL. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown}"
     write_status "refreshed_saved_login" "${location}"
   fi
@@ -221,12 +229,8 @@ if ! network_is_possible_target "${SSID}" "${WIFI_IP}"; then
 fi
 
 if captive_check_success; then
-  if ! refresh_saved_login_if_due; then
-    true
-  fi
-  if [[ -f "${STATUS_FILE}" ]] && grep -q "result=refreshed_saved_login" "${STATUS_FILE}" 2>/dev/null; then
-    true
-  else
+  refresh_saved_login_if_due || true
+  if [[ "${REFRESHED_SAVED_LOGIN}" != "1" ]]; then
     write_status "online_no_captive"
   fi
   exit 0
