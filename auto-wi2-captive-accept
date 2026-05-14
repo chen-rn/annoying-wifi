@@ -18,6 +18,7 @@ PORTAL_DETECTED=0
 PORTAL_LOCATION=""
 DIRECT_ACCEPTED=0
 REFRESHED_SAVED_LOGIN=0
+UNSUPPORTED_CAPTIVE=0
 
 timestamp() {
   date "+%Y-%m-%d %H:%M:%S"
@@ -117,8 +118,9 @@ network_is_possible_target() {
   fi
 
   # Captive portals can hide the SSID from networksetup. Observed ranges:
-  # DOUTOR/Wi2: 10.68.x.x; Starbucks/Wi2: 10.18.x.x; Tully's/USEN: 10.1.1.x.
-  if [[ -z "${ssid}" && ( "${ip}" == 10.68.* || "${ip}" == 10.18.* || "${ip}" == 10.1.1.* ) ]]; then
+  # DOUTOR/Wi2: 10.68.x.x; Starbucks/Wi2: 10.18.x.x; Tully's/USEN:
+  # 10.1.1.x portal-side addresses and 192.168.151.x client-side leases.
+  if [[ -z "${ssid}" && ( "${ip}" == 10.68.* || "${ip}" == 10.18.* || "${ip}" == 10.1.1.* || "${ip}" == 192.168.151.* ) ]]; then
     return 0
   fi
 
@@ -127,11 +129,11 @@ network_is_possible_target() {
 
 target_regex() {
   local IFS="|"
-  print -r -- "DOUTOR_FREE_Wi-Fi|at_STARBUCKS_Wi2|tullys_Wi-Fi|Wi2 Free Wi-Fi Service|USEN Free Wi-Fi|USEN CORPORATION|Free Wi-Fi|${TARGET_HOSTS[*]}"
+  print -r -- "DOUTOR_FREE_Wi-Fi|at_STARBUCKS_Wi2|tullys_Wi-Fi|TULLY|Wi2 Free Wi-Fi Service|USEN Free Wi-Fi|USEN CORPORATION|${TARGET_HOSTS[*]}"
 }
 
 open_portal_if_needed() {
-  local response_headers response_body location pattern
+  local response_headers response_body location pattern response_matches_target
   response_headers="$(mktemp -t auto-wi2-headers.XXXXXX)"
   response_body="$(mktemp -t auto-wi2-body.XXXXXX)"
   pattern="$(target_regex)"
@@ -144,7 +146,20 @@ open_portal_if_needed() {
     return 0
   fi
 
-  if ! grep -Eiq "${pattern}" "${response_headers}" "${response_body}"; then
+  response_matches_target=0
+  if grep -Eiq "${pattern}" "${response_headers}" "${response_body}"; then
+    response_matches_target=1
+  fi
+
+  if [[ "${response_matches_target}" != "1" ]] && ! network_is_possible_target "${SSID}" "${WIFI_IP}"; then
+    UNSUPPORTED_CAPTIVE=1
+    write_status "skipped_unsupported_captive_portal"
+    log "Captive check failed, but response did not match supported Wi2/USEN portal markers. Skipping automation. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown}"
+    rm -f "${response_headers}" "${response_body}"
+    return 0
+  fi
+
+  if [[ "${response_matches_target}" != "1" ]]; then
     log "Captive check failed on target-like Wi2 network but response did not match known portal markers. Trying portal flow anyway. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown}"
   fi
 
@@ -238,10 +253,6 @@ refresh_saved_login_if_due() {
 SSID="$(current_ssid || true)"
 WIFI_IP="$(current_wifi_ip || true)"
 load_config
-if ! network_is_possible_target "${SSID}" "${WIFI_IP}"; then
-  write_status "skipped_non_target_ssid"
-  exit 0
-fi
 
 if captive_check_success; then
   refresh_saved_login_if_due || true
@@ -252,6 +263,10 @@ if captive_check_success; then
 fi
 
 open_portal_if_needed
+
+if [[ "${UNSUPPORTED_CAPTIVE}" == "1" ]]; then
+  exit 0
+fi
 
 if [[ "${DIRECT_ACCEPTED}" == "1" ]]; then
   exit 0
@@ -281,7 +296,7 @@ on textContainsAny(haystack, needles)
   return false
 end textContainsAny
 
-set targetNeedles to {"DOUTOR_FREE_Wi-Fi", "at_STARBUCKS_Wi2", "tullys_Wi-Fi", "service.wi2.ne.jp", "10.1.1.100", "Wi2 Free Wi-Fi Service", "USEN Free Wi-Fi", "USEN CORPORATION", "Free Wi-Fi"}
+set targetNeedles to {"DOUTOR_FREE_Wi-Fi", "at_STARBUCKS_Wi2", "tullys_Wi-Fi", "service.wi2.ne.jp", "10.1.1.100", "Wi2 Free Wi-Fi Service", "USEN Free Wi-Fi", "USEN CORPORATION"}
 set buttonLabels to {"Accept", "Connect", "Connect to the internet", "Continue to proceed", "Agree", "同意する", "接続"}
 
 tell application "System Events"
