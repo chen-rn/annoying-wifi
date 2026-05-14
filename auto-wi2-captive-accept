@@ -3,12 +3,15 @@ set -euo pipefail
 
 PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 APP_DIR="${HOME}/.local/share/auto-wi2-captive-accept"
+CONFIG_FILE="${HOME}/.config/auto-wi2-captive-accept/config"
 LOG_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.log"
 STATUS_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.status"
 LAST_PORTAL_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.last-url"
 LAST_REFRESH_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.last-refresh"
-TARGET_SSIDS=("DOUTOR_FREE_Wi-Fi" "at_STARBUCKS_Wi2" "Wi2_Free" "Wi2free" "Wi2")
-TARGET_HOSTS=("service.wi2.ne.jp")
+LAST_BROWSER_RESULT_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.last-browser-result.json"
+BROWSER_CAPTURE_DIR="${HOME}/Library/Logs/auto-wi2-captive-accept-captures"
+TARGET_SSIDS=("DOUTOR_FREE_Wi-Fi" "at_STARBUCKS_Wi2" "Wi2_Free" "Wi2free" "Wi2" "tullys_Wi-Fi")
+TARGET_HOSTS=("service.wi2.ne.jp" "10[.]1[.]1[.]100")
 CAPTIVE_CHECK_URL="http://captive.apple.com/hotspot-detect.html"
 BROWSER_ACCEPT_HELPER="${APP_DIR}/auto-wi2-browser-accept.js"
 PORTAL_DETECTED=0
@@ -18,6 +21,14 @@ REFRESHED_SAVED_LOGIN=0
 
 timestamp() {
   date "+%Y-%m-%d %H:%M:%S"
+}
+
+load_config() {
+  if [[ -f "${CONFIG_FILE}" ]]; then
+    set -a
+    source "${CONFIG_FILE}"
+    set +a
+  fi
 }
 
 log() {
@@ -105,9 +116,9 @@ network_is_possible_target() {
     return 0
   fi
 
-  # Wi2 portals can hide the SSID from networksetup. Observed ranges:
-  # DOUTOR/Wi2: 10.68.x.x; Starbucks/Wi2: 10.18.x.x.
-  if [[ -z "${ssid}" && ( "${ip}" == 10.68.* || "${ip}" == 10.18.* ) ]]; then
+  # Captive portals can hide the SSID from networksetup. Observed ranges:
+  # DOUTOR/Wi2: 10.68.x.x; Starbucks/Wi2: 10.18.x.x; Tully's/USEN: 10.1.1.x.
+  if [[ -z "${ssid}" && ( "${ip}" == 10.68.* || "${ip}" == 10.18.* || "${ip}" == 10.1.1.* ) ]]; then
     return 0
   fi
 
@@ -116,7 +127,7 @@ network_is_possible_target() {
 
 target_regex() {
   local IFS="|"
-  print -r -- "DOUTOR_FREE_Wi-Fi|at_STARBUCKS_Wi2|Wi2 Free Wi-Fi Service|Free Wi-Fi|${TARGET_HOSTS[*]}"
+  print -r -- "DOUTOR_FREE_Wi-Fi|at_STARBUCKS_Wi2|tullys_Wi-Fi|Wi2 Free Wi-Fi Service|USEN Free Wi-Fi|USEN CORPORATION|Free Wi-Fi|${TARGET_HOSTS[*]}"
 }
 
 open_portal_if_needed() {
@@ -139,7 +150,7 @@ open_portal_if_needed() {
 
   location="$(awk 'tolower($1) == "location:" { sub(/\r$/, "", $2); print $2; exit }' "${response_headers}")"
   if [[ -z "${location}" ]]; then
-    location="$(grep -Eho 'https?://[^"<>[:space:]]+' "${response_headers}" "${response_body}" 2>/dev/null | grep -m 1 'service\.wi2\.ne\.jp' || true)"
+    location="$(grep -Eho 'https?://[^"<>[:space:]]+' "${response_headers}" "${response_body}" 2>/dev/null | grep -Em 1 '(service\.wi2\.ne\.jp|10\.1\.1\.100)' || true)"
   fi
   [[ -n "${location}" ]] || location="${CAPTIVE_CHECK_URL}"
   PORTAL_DETECTED=1
@@ -147,23 +158,26 @@ open_portal_if_needed() {
   print -r -- "${location}" > "${LAST_PORTAL_FILE}"
 
   write_status "portal_detected" "${location}"
-  log "Detected Wi2 captive portal redirect. Trying direct login. ssid=${SSID:-unknown} location=${location}"
-  notify "Detected Wi2 captive portal. Trying to accept it now."
+  log "Detected captive portal redirect. Trying direct login. ssid=${SSID:-unknown} location=${location}"
+  notify "Detected supported captive portal. Trying to accept it now."
 
   if [[ -x "${BROWSER_ACCEPT_HELPER}" ]] && command -v node >/dev/null 2>&1; then
-    if browser_output="$(node "${BROWSER_ACCEPT_HELPER}" "${location}" 2>&1)"; then
+    mkdir -p "${BROWSER_CAPTURE_DIR}"
+    if browser_output="$(AUTO_WI2_CAPTURE_DIR="${BROWSER_CAPTURE_DIR}" node "${BROWSER_ACCEPT_HELPER}" "${location}" 2>&1)"; then
+      print -r -- "${browser_output}" > "${LAST_BROWSER_RESULT_FILE}"
       sleep 3
       if captive_check_success; then
         DIRECT_ACCEPTED=1
-        log "Browser automation cleared Wi2 captive portal. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown} output=${browser_output}"
+        log "Browser automation cleared captive portal. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown} output=${browser_output}"
         write_status "browser_accept_success" "${location}"
-        notify "Wi2 captive portal cleared by browser automation."
+        notify "Captive portal cleared by browser automation."
         rm -f "${response_headers}" "${response_body}"
         return 0
       fi
-      log "Browser automation clicked but captive check still fails. ssid=${SSID:-unknown} output=${browser_output}"
+      log "Browser automation clicked but captive check still fails. ssid=${SSID:-unknown} output=${browser_output} last_result=${LAST_BROWSER_RESULT_FILE} capture_dir=${BROWSER_CAPTURE_DIR}"
     else
-      log "Browser automation failed. ssid=${SSID:-unknown} output=${browser_output}"
+      print -r -- "${browser_output}" > "${LAST_BROWSER_RESULT_FILE}"
+      log "Browser automation failed. ssid=${SSID:-unknown} output=${browser_output} last_result=${LAST_BROWSER_RESULT_FILE} capture_dir=${BROWSER_CAPTURE_DIR}"
     fi
   fi
 
@@ -175,15 +189,15 @@ open_portal_if_needed() {
     sleep 3
     if captive_check_success; then
       DIRECT_ACCEPTED=1
-      log "Direct Wi2 login cleared captive portal. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown}"
+      log "Direct login cleared captive portal. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown}"
       write_status "direct_login_success" "${location}"
-      notify "Wi2 captive portal cleared automatically."
+      notify "Captive portal cleared automatically."
       rm -f "${response_headers}" "${response_body}"
       return 0
     fi
   fi
 
-  log "Direct Wi2 login did not clear captive portal. Opening portal UI. ssid=${SSID:-unknown} location=${location}"
+  log "Direct login did not clear captive portal. Opening portal UI. ssid=${SSID:-unknown} location=${location}"
   open -b "com.apple.CaptiveNetworkAssistant" "${location}" >/dev/null 2>&1 \
     || open -a "Captive Network Assistant" "${location}" >/dev/null 2>&1 \
     || open "${location}" >/dev/null 2>&1 \
@@ -223,6 +237,7 @@ refresh_saved_login_if_due() {
 
 SSID="$(current_ssid || true)"
 WIFI_IP="$(current_wifi_ip || true)"
+load_config
 if ! network_is_possible_target "${SSID}" "${WIFI_IP}"; then
   write_status "skipped_non_target_ssid"
   exit 0
@@ -266,8 +281,8 @@ on textContainsAny(haystack, needles)
   return false
 end textContainsAny
 
-set targetNeedles to {"DOUTOR_FREE_Wi-Fi", "at_STARBUCKS_Wi2", "service.wi2.ne.jp", "Wi2 Free Wi-Fi Service", "Free Wi-Fi"}
-set buttonLabels to {"Accept", "Connect", "Agree", "同意する", "接続"}
+set targetNeedles to {"DOUTOR_FREE_Wi-Fi", "at_STARBUCKS_Wi2", "tullys_Wi-Fi", "service.wi2.ne.jp", "10.1.1.100", "Wi2 Free Wi-Fi Service", "USEN Free Wi-Fi", "USEN CORPORATION", "Free Wi-Fi"}
+set buttonLabels to {"Accept", "Connect", "Connect to the internet", "Continue to proceed", "Agree", "同意する", "接続"}
 
 tell application "System Events"
   repeat with passIndex from 1 to 3

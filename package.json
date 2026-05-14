@@ -2,7 +2,7 @@
   "name": "auto-wi2-captive-accept",
   "version": "1.0.0",
   "private": true,
-  "description": "macOS LaunchAgent scripts for accepting Wi2 captive portals used by DOUTOR and Starbucks.",
+  "description": "macOS LaunchAgent scripts for accepting captive portals used by DOUTOR, Starbucks, and Tully's/USEN.",
   "license": "UNLICENSED",
   "dependencies": {
     "playwright": "^1.52.0"
