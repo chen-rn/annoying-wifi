@@ -19,6 +19,7 @@ PORTAL_LOCATION=""
 DIRECT_ACCEPTED=0
 REFRESHED_SAVED_LOGIN=0
 UNSUPPORTED_CAPTIVE=0
+BROWSER_RESULT="not_attempted"
 
 timestamp() {
   date "+%Y-%m-%d %H:%M:%S"
@@ -132,6 +133,11 @@ target_regex() {
   print -r -- "DOUTOR_FREE_Wi-Fi|at_STARBUCKS_Wi2|tullys_Wi-Fi|TULLY|Wi2 Free Wi-Fi Service|USEN Free Wi-Fi|USEN CORPORATION|${TARGET_HOSTS[*]}"
 }
 
+portal_is_usen_local() {
+  local location="$1"
+  [[ "${location}" == http://10.1.1.100:* || "${location}" == http://10.1.1.100/* ]]
+}
+
 open_portal_if_needed() {
   local response_headers response_body location pattern response_matches_target
   response_headers="$(mktemp -t auto-wi2-headers.XXXXXX)"
@@ -173,12 +179,17 @@ open_portal_if_needed() {
   print -r -- "${location}" > "${LAST_PORTAL_FILE}"
 
   write_status "portal_detected" "${location}"
-  log "Detected captive portal redirect. Trying direct login. ssid=${SSID:-unknown} location=${location}"
+  if portal_is_usen_local "${location}"; then
+    log "Detected Tully's/USEN local captive portal redirect. Trying browser automation first, then native captive popup if browser routing fails. ssid=${SSID:-unknown} location=${location}"
+  else
+    log "Detected captive portal redirect. Trying direct login. ssid=${SSID:-unknown} location=${location}"
+  fi
   notify "Detected supported captive portal. Trying to accept it now."
 
   if [[ -x "${BROWSER_ACCEPT_HELPER}" ]] && command -v node >/dev/null 2>&1; then
     mkdir -p "${BROWSER_CAPTURE_DIR}"
     if browser_output="$(AUTO_WI2_CAPTURE_DIR="${BROWSER_CAPTURE_DIR}" node "${BROWSER_ACCEPT_HELPER}" "${location}" 2>&1)"; then
+      BROWSER_RESULT="clicked"
       print -r -- "${browser_output}" > "${LAST_BROWSER_RESULT_FILE}"
       sleep 3
       if captive_check_success; then
@@ -191,12 +202,22 @@ open_portal_if_needed() {
       fi
       log "Browser automation clicked but captive check still fails. ssid=${SSID:-unknown} output=${browser_output} last_result=${LAST_BROWSER_RESULT_FILE} capture_dir=${BROWSER_CAPTURE_DIR}"
     else
+      if print -r -- "${browser_output}" | grep -Eq 'net::ERR_(INTERNET_DISCONNECTED|NETWORK_CHANGED|ADDRESS_UNREACHABLE|CONNECTION_REFUSED|CONNECTION_RESET|TIMED_OUT)'; then
+        BROWSER_RESULT="network_error"
+        if portal_is_usen_local "${location}"; then
+          log "Browser automation could not route to Tully's/USEN local portal. Switching to native captive popup. ssid=${SSID:-unknown} output=${browser_output} last_result=${LAST_BROWSER_RESULT_FILE}"
+        else
+          log "Browser automation hit a network error. Falling back to native captive popup. ssid=${SSID:-unknown} output=${browser_output} last_result=${LAST_BROWSER_RESULT_FILE}"
+        fi
+      else
+        BROWSER_RESULT="failed"
+        log "Browser automation failed. ssid=${SSID:-unknown} output=${browser_output} last_result=${LAST_BROWSER_RESULT_FILE} capture_dir=${BROWSER_CAPTURE_DIR}"
+      fi
       print -r -- "${browser_output}" > "${LAST_BROWSER_RESULT_FILE}"
-      log "Browser automation failed. ssid=${SSID:-unknown} output=${browser_output} last_result=${LAST_BROWSER_RESULT_FILE} capture_dir=${BROWSER_CAPTURE_DIR}"
     fi
   fi
 
-  if curl -L --silent --show-error --connect-timeout 3 --max-time 15 \
+  if [[ "${BROWSER_RESULT}" != "network_error" ]] && curl -L --silent --show-error --connect-timeout 3 --max-time 15 \
     --cookie-jar /tmp/auto-wi2-cookies.txt \
     --cookie /tmp/auto-wi2-cookies.txt \
     --output /tmp/auto-wi2-direct-login.html \
@@ -212,7 +233,11 @@ open_portal_if_needed() {
     fi
   fi
 
-  log "Direct login did not clear captive portal. Opening portal UI. ssid=${SSID:-unknown} location=${location}"
+  if [[ "${BROWSER_RESULT}" == "network_error" ]]; then
+    log "Skipped curl direct login after browser network error. Opening native portal UI. ssid=${SSID:-unknown} location=${location}"
+  else
+    log "Direct login did not clear captive portal. Opening portal UI. ssid=${SSID:-unknown} location=${location}"
+  fi
   open -b "com.apple.CaptiveNetworkAssistant" "${location}" >/dev/null 2>&1 \
     || open -a "Captive Network Assistant" "${location}" >/dev/null 2>&1 \
     || open "${location}" >/dev/null 2>&1 \
@@ -284,6 +309,7 @@ if ! pgrep -x "Captive Network Assistant" >/dev/null 2>&1 \
 fi
 
 export AUTO_WI2_PORTAL_DETECTED="${PORTAL_DETECTED}"
+export AUTO_WI2_BROWSER_RESULT="${BROWSER_RESULT}"
 RESULT="$(osascript <<'APPLESCRIPT'
 set clicked to false
 set matched to false
@@ -358,12 +384,12 @@ case "${RESULT}" in
   clicked)
     sleep 4
     if captive_check_success; then
-      log "Clicked Accept for Wi2 captive portal and captive check now passes. ssid=${SSID:-unknown}"
-      write_status "clicked_accept_success"
+      log "Native captive popup cleared Wi2 captive portal. ssid=${SSID:-unknown} browser_result=${BROWSER_RESULT}"
+      write_status "native_popup_success" "browser_result=${BROWSER_RESULT}"
       notify "Clicked Accept for ${SSID:-Wi2 captive portal}; network check passes."
     else
-      log "Clicked Accept for Wi2 captive portal but captive check still fails. ssid=${SSID:-unknown}"
-      write_status "clicked_accept_still_captive"
+      log "Native captive popup clicked Wi2 captive portal but captive check still fails. ssid=${SSID:-unknown} browser_result=${BROWSER_RESULT}"
+      write_status "native_popup_still_captive" "browser_result=${BROWSER_RESULT}"
       notify "Clicked Accept for ${SSID:-Wi2 captive portal}, but network still looks captive."
     fi
     ;;
