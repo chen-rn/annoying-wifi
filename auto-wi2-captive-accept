@@ -138,6 +138,32 @@ portal_is_usen_local() {
   [[ "${location}" == http://10.1.1.100:* || "${location}" == http://10.1.1.100/* ]]
 }
 
+captive_window_is_running() {
+  pgrep -x "Captive Network Assistant" >/dev/null 2>&1 \
+    || pgrep -x "CaptiveNetworkAssistant" >/dev/null 2>&1
+}
+
+wait_for_captive_window() {
+  local max_wait="$1"
+  local waited=0
+  while [[ "${waited}" -lt "${max_wait}" ]]; do
+    if captive_window_is_running; then
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  captive_window_is_running
+}
+
+open_native_portal() {
+  local location="$1"
+  open -b "com.apple.CaptiveNetworkAssistant" "${location}" >/dev/null 2>&1 \
+    || open -a "Captive Network Assistant" "${location}" >/dev/null 2>&1 \
+    || open "${location}" >/dev/null 2>&1 \
+    || true
+}
+
 open_portal_if_needed() {
   local response_headers response_body location pattern response_matches_target
   response_headers="$(mktemp -t auto-wi2-headers.XXXXXX)"
@@ -185,6 +211,15 @@ open_portal_if_needed() {
     log "Detected captive portal redirect. Trying direct login. ssid=${SSID:-unknown} location=${location}"
   fi
   notify "Detected supported captive portal. Trying to accept it now."
+
+  if portal_is_usen_local "${location}"; then
+    BROWSER_RESULT="skipped_usen_native"
+    log "Skipping headless browser for Tully's/USEN local portal because USPOT-02 renders blank there. Opening native captive popup. ssid=${SSID:-unknown} location=${location}"
+    open_native_portal "${location}"
+    rm -f "${response_headers}" "${response_body}"
+    wait_for_captive_window 20 >/dev/null 2>&1 || true
+    return 0
+  fi
 
   if [[ -x "${BROWSER_ACCEPT_HELPER}" ]] && command -v node >/dev/null 2>&1; then
     mkdir -p "${BROWSER_CAPTURE_DIR}"
@@ -238,13 +273,10 @@ open_portal_if_needed() {
   else
     log "Direct login did not clear captive portal. Opening portal UI. ssid=${SSID:-unknown} location=${location}"
   fi
-  open -b "com.apple.CaptiveNetworkAssistant" "${location}" >/dev/null 2>&1 \
-    || open -a "Captive Network Assistant" "${location}" >/dev/null 2>&1 \
-    || open "${location}" >/dev/null 2>&1 \
-    || true
+  open_native_portal "${location}"
 
   rm -f "${response_headers}" "${response_body}"
-  sleep 3
+  wait_for_captive_window 10 >/dev/null 2>&1 || sleep 3
 }
 
 refresh_saved_login_if_due() {
@@ -297,8 +329,7 @@ if [[ "${DIRECT_ACCEPTED}" == "1" ]]; then
   exit 0
 fi
 
-if ! pgrep -x "Captive Network Assistant" >/dev/null 2>&1 \
-  && ! pgrep -x "CaptiveNetworkAssistant" >/dev/null 2>&1; then
+if ! wait_for_captive_window 20; then
   if [[ "${PORTAL_DETECTED}" == "1" ]]; then
     write_status "portal_detected_but_no_window" "${PORTAL_LOCATION}"
     notify "Detected Wi2 captive portal, but no accept window appeared."
@@ -323,10 +354,10 @@ on textContainsAny(haystack, needles)
 end textContainsAny
 
 set targetNeedles to {"DOUTOR_FREE_Wi-Fi", "at_STARBUCKS_Wi2", "tullys_Wi-Fi", "service.wi2.ne.jp", "10.1.1.100", "Wi2 Free Wi-Fi Service", "USEN Free Wi-Fi", "USEN CORPORATION"}
-set buttonLabels to {"Accept", "Connect", "Connect to the internet", "Continue to proceed", "Agree", "同意する", "接続"}
+set buttonLabels to {"Accept", "Connect", "Connect to the internet", "Continue to proceed", "Agree", "Next", "Start", "同意する", "接続", "次へ", "開始"}
 
 tell application "System Events"
-  repeat with passIndex from 1 to 3
+  repeat with passIndex from 1 to 6
     set clickedThisPass to false
     repeat with processName in {"Captive Network Assistant", "CaptiveNetworkAssistant"}
       set processNameText to processName as text

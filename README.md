@@ -11,7 +11,7 @@ Supported SSIDs:
 - `Wi2`
 - `tullys_Wi-Fi`
 
-The launcher runs every 30 seconds, checks `http://captive.apple.com/hotspot-detect.html`, and tries to clear supported captive portals with a headless Playwright helper. It identifies supported portals from the captive response first, using Wi2/USEN/DOUTOR/Starbucks/Tully's markers such as `service.wi2.ne.jp`, `10.1.1.100`, `USEN Free Wi-Fi`, and `tullys_Wi-Fi`; SSID and known client IP ranges are only fallback hints. If browser automation fails, it opens Captive Network Assistant and uses AppleScript to click portal buttons. Starbucks is handled as a two-step flow: `Connect`, then `Accept`. Tully's/USEN is handled as a two-step flow: fill `Birth Year` with `1990` and `Gender` with `Male`, click `Continue to proceed`, then click `Connect to the internet`.
+The launcher runs every 30 seconds, checks `http://captive.apple.com/hotspot-detect.html`, and tries to clear supported captive portals with a headless Playwright helper. It identifies supported portals from the captive response first, using Wi2/USEN/DOUTOR/Starbucks/Tully's markers such as `service.wi2.ne.jp`, `10.1.1.100`, `USEN Free Wi-Fi`, and `tullys_Wi-Fi`; SSID and known client IP ranges are only fallback hints. If browser automation fails, it opens Captive Network Assistant and uses AppleScript to click portal buttons. Starbucks is handled as a two-step flow: `Connect`, then `Accept`. Tully's/USEN local portals are opened directly in Captive Network Assistant because the `USPOT-02` JavaScript app can render blank in headless Chromium; the launcher then waits for the native popup and clicks through the visible portal controls.
 
 Optional overrides can be placed in `~/.config/auto-wi2-captive-accept/config`:
 
