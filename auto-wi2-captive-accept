@@ -13,6 +13,10 @@ BROWSER_CAPTURE_DIR="${HOME}/Library/Logs/auto-wi2-captive-accept-captures"
 TARGET_SSIDS=("DOUTOR_FREE_Wi-Fi" "at_STARBUCKS_Wi2" "Wi2_Free" "Wi2free" "Wi2" "tullys_Wi-Fi")
 TARGET_HOSTS=("service.wi2.ne.jp" "10[.]1[.]1[.]100")
 CAPTIVE_CHECK_URL="http://captive.apple.com/hotspot-detect.html"
+GENERAL_CHECK_URL="http://example.com/"
+GSTATIC_CHECK_URL="http://connectivitycheck.gstatic.com/generate_204"
+CAPTIVE_PROBE_URLS=("${CAPTIVE_CHECK_URL}" "${GENERAL_CHECK_URL}" "${GSTATIC_CHECK_URL}")
+DEFAULT_USEN_LOCAL_PORTAL="http://10.1.1.100:41873/captive/?url=captive.apple.com/hotspot-detect.html"
 BROWSER_ACCEPT_HELPER="${APP_DIR}/auto-wi2-browser-accept.js"
 PORTAL_DETECTED=0
 PORTAL_LOCATION=""
@@ -77,6 +81,63 @@ captive_check_success() {
   return 1
 }
 
+http_status_from_headers() {
+  awk 'toupper($1) ~ /^HTTP/ { code=$2 } END { print code }' "$1"
+}
+
+internet_probe_success() {
+  local url="$1"
+  local expected="$2"
+  local headers body http_status
+
+  headers="$(mktemp -t auto-wi2-internet-headers.XXXXXX)"
+  body="$(mktemp -t auto-wi2-internet-body.XXXXXX)"
+  if ! curl --silent --show-error --connect-timeout 3 --max-time 8 \
+    --dump-header "${headers}" \
+    --output "${body}" \
+    "${url}" >/dev/null 2>&1; then
+    rm -f "${headers}" "${body}"
+    return 1
+  fi
+
+  http_status="$(http_status_from_headers "${headers}")"
+  case "${expected}" in
+    example)
+      if [[ "${http_status}" == "200" ]] && grep -qi "Example Domain" "${body}"; then
+        rm -f "${headers}" "${body}"
+        return 0
+      fi
+      ;;
+    gstatic)
+      if [[ "${http_status}" == "204" ]]; then
+        rm -f "${headers}" "${body}"
+        return 0
+      fi
+      ;;
+  esac
+
+  rm -f "${headers}" "${body}"
+  return 1
+}
+
+general_internet_check_success() {
+  internet_probe_success "${GENERAL_CHECK_URL}" "example" \
+    || internet_probe_success "${GSTATIC_CHECK_URL}" "gstatic"
+}
+
+online_check_success() {
+  if ! captive_check_success; then
+    return 1
+  fi
+
+  if network_is_possible_target "${SSID:-}" "${WIFI_IP:-}" && ! general_internet_check_success; then
+    log "Apple captive check passed, but general internet probes failed on a target-like network. Treating as captive. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown}"
+    return 1
+  fi
+
+  return 0
+}
+
 wifi_device() {
   networksetup -listallhardwareports 2>/dev/null | awk '
     /Hardware Port: Wi-Fi|Hardware Port: AirPort/ {
@@ -138,6 +199,97 @@ portal_is_usen_local() {
   [[ "${location}" == http://10.1.1.100:* || "${location}" == http://10.1.1.100/* ]]
 }
 
+saved_usen_local_portal() {
+  local location
+
+  [[ -f "${LAST_PORTAL_FILE}" ]] || return 1
+  location="$(cat "${LAST_PORTAL_FILE}" 2>/dev/null || true)"
+  portal_is_usen_local "${location}" || return 1
+  print -r -- "${location}"
+}
+
+usen_local_portal_fallback() {
+  if saved_usen_local_portal; then
+    return 0
+  fi
+
+  if [[ "${WIFI_IP:-}" == 192.168.151.* || "${WIFI_IP:-}" == 10.1.1.* ]]; then
+    print -r -- "${DEFAULT_USEN_LOCAL_PORTAL}"
+    return 0
+  fi
+
+  return 1
+}
+
+json_escape() {
+  print -r -- "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+normalize_usen_gender() {
+  local gender_value normalized_gender
+  gender_value="$1"
+  normalized_gender="$(print -r -- "${gender_value}" | tr '[:upper:]' '[:lower:]')"
+
+  case "${normalized_gender}" in
+    f|female|woman|women|*女性*)
+      print -r -- "female"
+      ;;
+    n/a|na|none|etc|other|unknown|*指定なし*)
+      print -r -- "etc"
+      ;;
+    *)
+      print -r -- "male"
+      ;;
+  esac
+}
+
+usen_direct_accept() {
+  local location="$1"
+  local origin stamac birth_year gender_value payload response_file http_code response_text
+
+  portal_is_usen_local "${location}" || return 1
+
+  origin="${location%%/captive/*}"
+  [[ -n "${origin}" && "${origin}" != "${location}" ]] || return 1
+
+  stamac="$(print -r -- "${location}" | sed -n 's/.*[?&]stamac=\([^&]*\).*/\1/p')"
+  [[ -n "${stamac}" ]] || stamac="00:00:00:00:00:00"
+
+  birth_year="${AUTO_WI2_BIRTH_YEAR:-1990}"
+  if [[ ! "${birth_year}" =~ '^[0-9]{4}$' ]]; then
+    birth_year="1990"
+  fi
+  gender_value="$(normalize_usen_gender "${AUTO_WI2_GENDER:-Male}")"
+
+  payload="{\"gender\":\"$(json_escape "${gender_value}")\",\"birth\":\"$(json_escape "${birth_year}")\",\"macaddr\":\"$(json_escape "${stamac}")\",\"lang\":\"en\"}"
+  response_file="$(mktemp -t auto-wi2-usen-api.XXXXXX)"
+
+  http_code="$(curl --silent --show-error --connect-timeout 3 --max-time 10 \
+    --output "${response_file}" \
+    --write-out "%{http_code}" \
+    --header "Content-Type: application/json;charset=UTF-8" \
+    --data "${payload}" \
+    "${origin}/capi/welcome" 2>/dev/null || true)"
+  response_text="$(cat "${response_file}" 2>/dev/null || true)"
+  rm -f "${response_file}"
+
+  if [[ "${http_code}" == "200" ]] && [[ "${response_text}" == *"ok"* || "${response_text}" == *"success"* ]]; then
+    log "Tully's/USEN local portal API accepted demographics. ssid=${SSID:-unknown} location=${location} response=${response_text}"
+    sleep 3
+    if online_check_success; then
+      DIRECT_ACCEPTED=1
+      write_status "usen_api_success" "${location}"
+      notify "Captive portal cleared by Tully's/USEN API."
+      return 0
+    fi
+    log "Tully's/USEN local portal API returned success but network still looks captive. ssid=${SSID:-unknown} location=${location}"
+  else
+    log "Tully's/USEN local portal API failed. ssid=${SSID:-unknown} location=${location} http_code=${http_code:-none} response=${response_text}"
+  fi
+
+  return 1
+}
+
 captive_window_is_running() {
   pgrep -x "Captive Network Assistant" >/dev/null 2>&1 \
     || pgrep -x "CaptiveNetworkAssistant" >/dev/null 2>&1
@@ -165,22 +317,50 @@ open_native_portal() {
 }
 
 open_portal_if_needed() {
-  local response_headers response_body location pattern response_matches_target
+  local response_headers response_body location pattern response_matches_target probe_url response_available saved_location
   response_headers="$(mktemp -t auto-wi2-headers.XXXXXX)"
   response_body="$(mktemp -t auto-wi2-body.XXXXXX)"
   pattern="$(target_regex)"
+  location=""
+  response_available=0
+  response_matches_target=0
 
-  if ! curl --silent --show-error --connect-timeout 3 --max-time 8 \
-    --dump-header "${response_headers}" \
-    --output "${response_body}" \
-    "${CAPTIVE_CHECK_URL}" >/dev/null 2>&1; then
-    rm -f "${response_headers}" "${response_body}"
-    return 0
+  for probe_url in "${CAPTIVE_PROBE_URLS[@]}"; do
+    : > "${response_headers}"
+    : > "${response_body}"
+    if ! curl --silent --show-error --connect-timeout 3 --max-time 8 \
+      --dump-header "${response_headers}" \
+      --output "${response_body}" \
+      "${probe_url}" >/dev/null 2>&1; then
+      continue
+    fi
+
+    response_available=1
+    if grep -Eiq "${pattern}" "${response_headers}" "${response_body}"; then
+      response_matches_target=1
+    fi
+
+    location="$(awk 'tolower($1) == "location:" { sub(/\r$/, "", $2); print $2; exit }' "${response_headers}")"
+    if [[ "${response_matches_target}" == "1" || -n "${location}" ]]; then
+      break
+    fi
+  done
+
+  if [[ "${response_available}" != "1" ]]; then
+    if network_is_possible_target "${SSID}" "${WIFI_IP}" && saved_location="$(usen_local_portal_fallback)"; then
+      location="${saved_location}"
+      response_matches_target=1
+      log "Captive probes did not return a response on a target-like network. Using Tully's/USEN local portal fallback. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown} location=${location}"
+    else
+      rm -f "${response_headers}" "${response_body}"
+      return 0
+    fi
   fi
 
-  response_matches_target=0
-  if grep -Eiq "${pattern}" "${response_headers}" "${response_body}"; then
+  if [[ -z "${location}" ]] && network_is_possible_target "${SSID}" "${WIFI_IP}" && saved_location="$(usen_local_portal_fallback)"; then
+    location="${saved_location}"
     response_matches_target=1
+    log "Captive probes did not expose a redirect on a target-like network. Using Tully's/USEN local portal fallback. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown} location=${location}"
   fi
 
   if [[ "${response_matches_target}" != "1" ]] && ! network_is_possible_target "${SSID}" "${WIFI_IP}"; then
@@ -195,7 +375,6 @@ open_portal_if_needed() {
     log "Captive check failed on target-like Wi2 network but response did not match known portal markers. Trying portal flow anyway. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown}"
   fi
 
-  location="$(awk 'tolower($1) == "location:" { sub(/\r$/, "", $2); print $2; exit }' "${response_headers}")"
   if [[ -z "${location}" ]]; then
     location="$(grep -Eho 'https?://[^"<>[:space:]]+' "${response_headers}" "${response_body}" 2>/dev/null | grep -Em 1 '(service\.wi2\.ne\.jp|10\.1\.1\.100)' || true)"
   fi
@@ -206,7 +385,7 @@ open_portal_if_needed() {
 
   write_status "portal_detected" "${location}"
   if portal_is_usen_local "${location}"; then
-    log "Detected Tully's/USEN local captive portal redirect. Trying browser automation first, then native captive popup if browser routing fails. ssid=${SSID:-unknown} location=${location}"
+    log "Detected Tully's/USEN local captive portal redirect. Trying local API first, then native captive popup fallback. ssid=${SSID:-unknown} location=${location}"
   else
     log "Detected captive portal redirect. Trying direct login. ssid=${SSID:-unknown} location=${location}"
   fi
@@ -214,7 +393,11 @@ open_portal_if_needed() {
 
   if portal_is_usen_local "${location}"; then
     BROWSER_RESULT="skipped_usen_native"
-    log "Skipping headless browser for Tully's/USEN local portal because USPOT-02 renders blank there. Opening native captive popup. ssid=${SSID:-unknown} location=${location}"
+    if usen_direct_accept "${location}"; then
+      rm -f "${response_headers}" "${response_body}"
+      return 0
+    fi
+    log "Skipping headless browser for Tully's/USEN local portal because USPOT-02 renders blank there. Opening native captive popup fallback. ssid=${SSID:-unknown} location=${location}"
     open_native_portal "${location}"
     rm -f "${response_headers}" "${response_body}"
     wait_for_captive_window 20 >/dev/null 2>&1 || true
@@ -227,7 +410,7 @@ open_portal_if_needed() {
       BROWSER_RESULT="clicked"
       print -r -- "${browser_output}" > "${LAST_BROWSER_RESULT_FILE}"
       sleep 3
-      if captive_check_success; then
+      if online_check_success; then
         DIRECT_ACCEPTED=1
         log "Browser automation cleared captive portal. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown} output=${browser_output}"
         write_status "browser_accept_success" "${location}"
@@ -258,7 +441,7 @@ open_portal_if_needed() {
     --output /tmp/auto-wi2-direct-login.html \
     "${location}" >/dev/null 2>&1; then
     sleep 3
-    if captive_check_success; then
+    if online_check_success; then
       DIRECT_ACCEPTED=1
       log "Direct login cleared captive portal. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown}"
       write_status "direct_login_success" "${location}"
@@ -310,8 +493,11 @@ refresh_saved_login_if_due() {
 SSID="$(current_ssid || true)"
 WIFI_IP="$(current_wifi_ip || true)"
 load_config
+AUTO_WI2_BIRTH_YEAR="${AUTO_WI2_BIRTH_YEAR:-1990}"
+AUTO_WI2_GENDER="${AUTO_WI2_GENDER:-Male}"
+export AUTO_WI2_BIRTH_YEAR AUTO_WI2_GENDER
 
-if captive_check_success; then
+if online_check_success; then
   refresh_saved_login_if_due || true
   if [[ "${REFRESHED_SAVED_LOGIN}" != "1" ]]; then
     write_status "online_no_captive"
@@ -341,10 +527,20 @@ fi
 
 export AUTO_WI2_PORTAL_DETECTED="${PORTAL_DETECTED}"
 export AUTO_WI2_BROWSER_RESULT="${BROWSER_RESULT}"
-RESULT="$(osascript <<'APPLESCRIPT'
+export AUTO_WI2_PORTAL_LOCATION="${PORTAL_LOCATION}"
+if ! RESULT="$(osascript 2>&1 <<'APPLESCRIPT'
 set clicked to false
 set matched to false
 set portalWasDetected to ((system attribute "AUTO_WI2_PORTAL_DETECTED") is "1")
+set portalLocation to (system attribute "AUTO_WI2_PORTAL_LOCATION")
+set browserResult to (system attribute "AUTO_WI2_BROWSER_RESULT")
+set birthYear to (system attribute "AUTO_WI2_BIRTH_YEAR")
+set genderValue to (system attribute "AUTO_WI2_GENDER")
+if birthYear is missing value or birthYear is "" then set birthYear to "1990"
+if genderValue is missing value or genderValue is "" then set genderValue to "Male"
+set usenNativeFlow to false
+if portalLocation is not missing value and portalLocation contains "10.1.1.100" then set usenNativeFlow to true
+if browserResult is "skipped_usen_native" then set usenNativeFlow to true
 
 on textContainsAny(haystack, needles)
   repeat with needle in needles
@@ -352,6 +548,63 @@ on textContainsAny(haystack, needles)
   end repeat
   return false
 end textContainsAny
+
+on lowerText(valueText)
+  set upperChars to "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  set lowerChars to "abcdefghijklmnopqrstuvwxyz"
+  set outputText to ""
+  repeat with charIndex from 1 to length of valueText
+    set currentChar to character charIndex of valueText
+    set foundIndex to offset of currentChar in upperChars
+    if foundIndex is 0 then
+      set outputText to outputText & currentChar
+    else
+      set outputText to outputText & character foundIndex of lowerChars
+    end if
+  end repeat
+  return outputText
+end lowerText
+
+on genderSearchText(genderValue)
+  set normalizedGender to my lowerText(genderValue as text)
+  if normalizedGender starts with "f" or normalizedGender contains "female" or normalizedGender contains "女性" then
+    return "Female"
+  end if
+  return "Male"
+end genderSearchText
+
+on clickWindowRatio(windowPosition, windowSize, xRatio, yRatio)
+  set clickX to (item 1 of windowPosition) + ((item 1 of windowSize) * xRatio)
+  set clickY to (item 2 of windowPosition) + ((item 2 of windowSize) * yRatio)
+  tell application "System Events"
+    click at {clickX as integer, clickY as integer}
+  end tell
+end clickWindowRatio
+
+on selectPopupAtRatio(windowPosition, windowSize, xRatio, yRatio, searchText)
+  tell application "System Events"
+    my clickWindowRatio(windowPosition, windowSize, xRatio, yRatio)
+    delay 0.25
+    keystroke (searchText as text)
+    delay 0.15
+    key code 36
+    delay 0.25
+  end tell
+end selectPopupAtRatio
+
+on runUsenNativeFlow(windowRef, birthYear, genderValue)
+  try
+    set windowPosition to position of windowRef
+    set windowSize to size of windowRef
+    my selectPopupAtRatio(windowPosition, windowSize, 0.34, 0.52, birthYear)
+    my selectPopupAtRatio(windowPosition, windowSize, 0.66, 0.52, my genderSearchText(genderValue))
+    my clickWindowRatio(windowPosition, windowSize, 0.5, 0.69)
+    delay 2
+    my clickWindowRatio(windowPosition, windowSize, 0.5, 0.27)
+    return true
+  end try
+  return false
+end runUsenNativeFlow
 
 set targetNeedles to {"DOUTOR_FREE_Wi-Fi", "at_STARBUCKS_Wi2", "tullys_Wi-Fi", "service.wi2.ne.jp", "10.1.1.100", "Wi2 Free Wi-Fi Service", "USEN Free Wi-Fi", "USEN CORPORATION"}
 set buttonLabels to {"Accept", "Connect", "Connect to the internet", "Continue to proceed", "Agree", "Next", "Start", "同意する", "接続", "次へ", "開始"}
@@ -372,6 +625,12 @@ tell application "System Events"
             set titleMatched to my textContainsAny(windowText, targetNeedles)
             if titleMatched or portalWasDetected then
               set matched to true
+              if usenNativeFlow and passIndex is less than or equal to 3 then
+                if my runUsenNativeFlow(windowRef, birthYear, genderValue) then
+                  set clicked to true
+                  set clickedThisPass to true
+                end if
+              end if
               repeat with buttonLabel in buttonLabels
                 if clickedThisPass is false then
                   try
@@ -385,9 +644,15 @@ tell application "System Events"
                 try
                   set windowPosition to position of windowRef
                   set windowSize to size of windowRef
-                  set clickX to (item 1 of windowPosition) + ((item 1 of windowSize) * 0.575)
-                  set clickY to (item 2 of windowPosition) + ((item 2 of windowSize) * 0.76)
-                  click at {clickX as integer, clickY as integer}
+                  if usenNativeFlow then
+                    if passIndex mod 2 is 1 then
+                      my clickWindowRatio(windowPosition, windowSize, 0.5, 0.69)
+                    else
+                      my clickWindowRatio(windowPosition, windowSize, 0.5, 0.27)
+                    end if
+                  else
+                    my clickWindowRatio(windowPosition, windowSize, 0.575, 0.76)
+                  end if
                   set clicked to true
                   set clickedThisPass to true
                 end try
@@ -409,12 +674,23 @@ else
   return "no_match"
 end if
 APPLESCRIPT
-)"
+)"; then
+  RESULT_DETAIL="$(print -r -- "${RESULT}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g' | cut -c 1-240)"
+  log "Native captive popup automation failed. ssid=${SSID:-unknown} browser_result=${BROWSER_RESULT} error=${RESULT_DETAIL}"
+  if print -r -- "${RESULT}" | grep -q -- "-25211"; then
+    write_status "native_popup_needs_accessibility_permission" "${RESULT_DETAIL}"
+    notify "Wi2 auto-accept needs Accessibility permission to click the captive portal."
+  else
+    write_status "native_popup_automation_failed" "${RESULT_DETAIL}"
+    notify "Could not click the Wi2 captive portal automatically."
+  fi
+  exit 0
+fi
 
 case "${RESULT}" in
   clicked)
     sleep 4
-    if captive_check_success; then
+    if online_check_success; then
       log "Native captive popup cleared Wi2 captive portal. ssid=${SSID:-unknown} browser_result=${BROWSER_RESULT}"
       write_status "native_popup_success" "browser_result=${BROWSER_RESULT}"
       notify "Clicked Accept for ${SSID:-Wi2 captive portal}; network check passes."
