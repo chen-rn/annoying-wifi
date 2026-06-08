@@ -13,14 +13,15 @@ export default function Home() {
 
         <section className="paper-body">
           <p>
-            Wi2 captive portals (Starbucks, DOUTOR) kick you off every 60
-            minutes. This is a small background script that clicks through the
-            portal for you, so the disconnect is invisible.
+            Wi2 captive portals used by Starbucks, DOUTOR, and Tully&apos;s/USEN
+            can kick you back to an accept screen. This is a small background
+            script that clears the portal for you, so the disconnect is
+            invisible.
           </p>
           <p>
             It runs every 30 seconds, detects the portal via Apple&apos;s
-            hotspot probe, and uses a headless Chromium to tap the right
-            buttons.
+            hotspot probe, and uses a headless Chromium or local portal API to
+            tap the right buttons.
           </p>
         </section>
 
@@ -29,6 +30,10 @@ export default function Home() {
           <span className="row-val">
             <code>DOUTOR_FREE_Wi-Fi</code>
             <code>at_STARBUCKS_Wi2</code>
+            <code>Wi2_Free</code>
+            <code>Wi2free</code>
+            <code>Wi2</code>
+            <code>tullys_Wi-Fi</code>
           </span>
         </section>
 

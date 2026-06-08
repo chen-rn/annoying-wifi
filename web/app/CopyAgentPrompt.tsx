@@ -12,7 +12,7 @@ const AGENT_PROMPT = `Install auto-wi2-captive-accept on this Mac.
    And tail the status:
      cat "$HOME/Library/Logs/auto-wi2-captive-accept.status"
 
-It runs every 30 seconds, detects Wi2 captive portals (DOUTOR, Starbucks, Wi2 Free), and auto-accepts them in headless Chromium. Designed for DOUTOR_FREE_Wi-Fi and at_STARBUCKS_Wi2; other Wi2 SSIDs may or may not work.`;
+It runs every 30 seconds, detects Wi2 captive portals used by DOUTOR, Starbucks, and Tully's/USEN, and auto-accepts them with headless Chromium or the local portal API. Supported SSIDs: DOUTOR_FREE_Wi-Fi, at_STARBUCKS_Wi2, Wi2_Free, Wi2free, Wi2, and tullys_Wi-Fi.`;
 
 type Props = {
   children: React.ReactNode;
