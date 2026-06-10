@@ -24,6 +24,13 @@ DIRECT_ACCEPTED=0
 REFRESHED_SAVED_LOGIN=0
 UNSUPPORTED_CAPTIVE=0
 BROWSER_RESULT="not_attempted"
+# Notifications are attributed to a tiny "Wi2 Auto-Connect.app" (built by install.sh)
+# so Notification Center shows a proper name + Wi-Fi icon instead of "terminal-notifier".
+NOTIFY_GROUP="wi2-auto-connect"
+NOTIFY_SENDER="com.${USER:-$(id -un)}.wi2autoconnect"
+# Click target for the latest notification. Wi2 Auto-Connect.app reads this on
+# launch (the notification click activates it) and opens the URL.
+CLICK_URL_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.click-url"
 
 timestamp() {
   date "+%Y-%m-%d %H:%M:%S"
@@ -55,15 +62,52 @@ write_status() {
   status "$@" > "${STATUS_FILE}"
 }
 
+# notify <state> [detail]
+#   state: progress | success | fail
+# A single grouped notification updates in place: the "progress" toast is
+# replaced by the "success"/"fail" result for the same connection attempt.
 notify() {
-  local message="$1"
-  if command -v terminal-notifier >/dev/null 2>&1; then
-    terminal-notifier \
-      -title "Wi2 Wi-Fi auto-accept" \
-      -message "${message}" \
-      -sound default >/dev/null 2>&1 || true
+  local state="$1"
+  local detail="${2:-}"
+  # Clicking the notification (or its "Show" button) opens this URL. Defaults to
+  # the detected captive portal so the user can finish/inspect the sign-in by hand.
+  # The click activates Wi2 Auto-Connect.app, which opens whatever is recorded here.
+  local click_url="${3:-${PORTAL_LOCATION:-}}"
+  local title body sound subtitle
+  subtitle="${SSID:-}"
+  if [[ -n "${click_url}" ]]; then
+    print -r -- "${click_url}" > "${CLICK_URL_FILE}" 2>/dev/null || true
   else
-    osascript -e "display notification \"${message}\" with title \"Wi2 Wi-Fi auto-accept\"" >/dev/null 2>&1 || true
+    rm -f "${CLICK_URL_FILE}" 2>/dev/null || true
+  fi
+  case "${state}" in
+    progress)
+      title="Connecting to Wi-Fi…"
+      body="${detail:-Clearing the Wi2 captive portal…}"
+      sound=""
+      ;;
+    success)
+      title="Wi-Fi Connected"
+      body="${detail:-Captive portal cleared automatically.}"
+      sound="Glass"
+      ;;
+    *)
+      title="Wi-Fi needs a hand"
+      body="${detail:-Could not clear the captive portal automatically.}"
+      sound="Basso"
+      ;;
+  esac
+
+  if command -v terminal-notifier >/dev/null 2>&1; then
+    local args=(-title "${title}" -message "${body}" -group "${NOTIFY_GROUP}" -sender "${NOTIFY_SENDER}")
+    if [[ -n "${subtitle}" ]]; then args+=(-subtitle "${subtitle}"); fi
+    if [[ -n "${sound}" ]]; then args+=(-sound "${sound}"); fi
+    terminal-notifier "${args[@]}" >/dev/null 2>&1 || true
+  else
+    local osa="display notification \"${body}\" with title \"${title}\""
+    if [[ -n "${subtitle}" ]]; then osa="${osa} subtitle \"${subtitle}\""; fi
+    if [[ -n "${sound}" ]]; then osa="${osa} sound name \"${sound}\""; fi
+    osascript -e "${osa}" >/dev/null 2>&1 || true
   fi
 }
 
@@ -279,7 +323,7 @@ usen_direct_accept() {
     if online_check_success; then
       DIRECT_ACCEPTED=1
       write_status "usen_api_success" "${location}"
-      notify "Captive portal cleared by Tully's/USEN API."
+      notify success
       return 0
     fi
     log "Tully's/USEN local portal API returned success but network still looks captive. ssid=${SSID:-unknown} location=${location}"
@@ -389,7 +433,7 @@ open_portal_if_needed() {
   else
     log "Detected captive portal redirect. Trying direct login. ssid=${SSID:-unknown} location=${location}"
   fi
-  notify "Detected supported captive portal. Trying to accept it now."
+  notify progress
 
   if portal_is_usen_local "${location}"; then
     BROWSER_RESULT="skipped_usen_native"
@@ -414,7 +458,7 @@ open_portal_if_needed() {
         DIRECT_ACCEPTED=1
         log "Browser automation cleared captive portal. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown} output=${browser_output}"
         write_status "browser_accept_success" "${location}"
-        notify "Captive portal cleared by browser automation."
+        notify success
         rm -f "${response_headers}" "${response_body}"
         return 0
       fi
@@ -445,7 +489,7 @@ open_portal_if_needed() {
       DIRECT_ACCEPTED=1
       log "Direct login cleared captive portal. ssid=${SSID:-unknown} ip=${WIFI_IP:-unknown}"
       write_status "direct_login_success" "${location}"
-      notify "Captive portal cleared automatically."
+      notify success
       rm -f "${response_headers}" "${response_body}"
       return 0
     fi
@@ -518,7 +562,7 @@ fi
 if ! wait_for_captive_window 20; then
   if [[ "${PORTAL_DETECTED}" == "1" ]]; then
     write_status "portal_detected_but_no_window" "${PORTAL_LOCATION}"
-    notify "Detected Wi2 captive portal, but no accept window appeared."
+    notify fail "Found the portal, but no sign-in window appeared."
   else
     write_status "no_portal_window"
   fi
@@ -679,10 +723,11 @@ APPLESCRIPT
   log "Native captive popup automation failed. ssid=${SSID:-unknown} browser_result=${BROWSER_RESULT} error=${RESULT_DETAIL}"
   if print -r -- "${RESULT}" | grep -q -- "-25211"; then
     write_status "native_popup_needs_accessibility_permission" "${RESULT_DETAIL}"
-    notify "Wi2 auto-accept needs Accessibility permission to click the captive portal."
+    notify fail "Grant Accessibility permission so it can tap the portal." \
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
   else
     write_status "native_popup_automation_failed" "${RESULT_DETAIL}"
-    notify "Could not click the Wi2 captive portal automatically."
+    notify fail "Could not tap the captive portal automatically."
   fi
   exit 0
 fi
@@ -693,11 +738,11 @@ case "${RESULT}" in
     if online_check_success; then
       log "Native captive popup cleared Wi2 captive portal. ssid=${SSID:-unknown} browser_result=${BROWSER_RESULT}"
       write_status "native_popup_success" "browser_result=${BROWSER_RESULT}"
-      notify "Clicked Accept for ${SSID:-Wi2 captive portal}; network check passes."
+      notify success
     else
       log "Native captive popup clicked Wi2 captive portal but captive check still fails. ssid=${SSID:-unknown} browser_result=${BROWSER_RESULT}"
       write_status "native_popup_still_captive" "browser_result=${BROWSER_RESULT}"
-      notify "Clicked Accept for ${SSID:-Wi2 captive portal}, but network still looks captive."
+      notify fail "Tapped Accept, but the network still looks blocked."
     fi
     ;;
   matched_no_button)
