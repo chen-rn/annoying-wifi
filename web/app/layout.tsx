@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Wi2 Auto-Accept",
+  title: "Annoying WiFi",
   description:
     "macOS background script that auto-clicks Wi2 captive portals so your laptop just connects.",
 };

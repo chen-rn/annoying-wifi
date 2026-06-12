@@ -1,4 +1,4 @@
-# auto-wi2-captive-accept
+# annoying-wifi
 
 macOS LaunchAgent scripts for automatically accepting captive portals used by DOUTOR, Starbucks, and Tully's/USEN.
 
@@ -21,13 +21,13 @@ When a portal is detected you get a single, grouped notification that updates in
 - **Wi-Fi Connected** — portal cleared automatically (Glass)
 - **Wi-Fi needs a hand** — could not finish automatically, with the reason (Basso)
 
-`install.sh` builds a small `Wi2 Auto-Connect.app` (under `~/.local/share/auto-wi2-captive-accept/`) and registers it with LaunchServices, so `terminal-notifier` shows a proper **Wi2 Auto-Connect** name and Wi-Fi icon instead of "terminal-notifier". The icon is generated from [`assets/icon.svg`](assets/icon.svg). Without `terminal-notifier` installed, it falls back to a plain `osascript` notification.
+`install.sh` builds a small `Annoying WiFi.app` (under `~/.local/share/annoying-wifi/`) and registers it with LaunchServices, so `terminal-notifier` shows a proper **Annoying WiFi** name and Wi-Fi icon instead of "terminal-notifier". The icon is generated from [`assets/icon.svg`](assets/icon.svg). Without `terminal-notifier` installed, it falls back to a plain `osascript` notification.
 
-Optional overrides can be placed in `~/.config/auto-wi2-captive-accept/config`:
+Optional overrides can be placed in `~/.config/annoying-wifi/config`:
 
 ```sh
-AUTO_WI2_BIRTH_YEAR=1990
-AUTO_WI2_GENDER=Male
+ANNOYING_WIFI_BIRTH_YEAR=1990
+ANNOYING_WIFI_GENDER=Male
 ```
 
 ## Install
@@ -39,17 +39,17 @@ AUTO_WI2_GENDER=Male
 Logs and status:
 
 ```sh
-cat "$HOME/Library/Logs/auto-wi2-captive-accept.status"
-tail -n 80 "$HOME/Library/Logs/auto-wi2-captive-accept.log"
-cat "$HOME/Library/Logs/auto-wi2-captive-accept.last-browser-result.json"
-open "$HOME/Library/Logs/auto-wi2-captive-accept-captures"
+cat "$HOME/Library/Logs/annoying-wifi.status"
+tail -n 80 "$HOME/Library/Logs/annoying-wifi.log"
+cat "$HOME/Library/Logs/annoying-wifi.last-browser-result.json"
+open "$HOME/Library/Logs/annoying-wifi-captures"
 ```
 
 ## Uninstall
 
 ```sh
-launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.$USER.auto-wi2-captive-accept.plist"
-rm -f "$HOME/Library/LaunchAgents/com.$USER.auto-wi2-captive-accept.plist"
-rm -f "$HOME/.local/bin/auto-wi2-captive-accept"
-rm -rf "$HOME/.local/share/auto-wi2-captive-accept"
+launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.$USER.annoying-wifi.plist"
+rm -f "$HOME/Library/LaunchAgents/com.$USER.annoying-wifi.plist"
+rm -f "$HOME/.local/bin/annoying-wifi"
+rm -rf "$HOME/.local/share/annoying-wifi"
 ```

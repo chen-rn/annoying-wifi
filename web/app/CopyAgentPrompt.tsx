@@ -2,15 +2,15 @@
 
 import { useState } from "react";
 
-const AGENT_PROMPT = `Install auto-wi2-captive-accept on this Mac.
+const AGENT_PROMPT = `Install annoying-wifi on this Mac.
 
-1. Clone https://github.com/chen-rn/auto-wi2-captive-accept into ~/Documents/projects (or wherever I keep code).
+1. Clone https://github.com/chen-rn/annoying-wifi into ~/Documents/projects (or wherever I keep code).
 2. cd into the cloned directory and run ./install.sh.
 3. The installer expects npm on PATH and will pull Playwright + Chromium. Let it run.
 4. Confirm the LaunchAgent is loaded:
-     launchctl list | grep auto-wi2-captive-accept
+     launchctl list | grep annoying-wifi
    And tail the status:
-     cat "$HOME/Library/Logs/auto-wi2-captive-accept.status"
+     cat "$HOME/Library/Logs/annoying-wifi.status"
 
 It runs every 30 seconds, detects Wi2 captive portals used by DOUTOR, Starbucks, and Tully's/USEN, and auto-accepts them with headless Chromium or the local portal API. Supported SSIDs: DOUTOR_FREE_Wi-Fi, at_STARBUCKS_Wi2, Wi2_Free, Wi2free, Wi2, and tullys_Wi-Fi.`;
 

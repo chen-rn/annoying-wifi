@@ -1,8 +1,8 @@
 {
-  "name": "auto-wi2-web",
+  "name": "annoying-wifi-web",
   "version": "0.1.0",
   "private": true,
-  "description": "Landing page for auto-wi2-captive-accept.",
+  "description": "Landing page for annoying-wifi.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

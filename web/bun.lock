@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "auto-wi2-web",
+      "name": "annoying-wifi-web",
       "dependencies": {
         "next": "16.2.4",
         "react": "19.2.5",

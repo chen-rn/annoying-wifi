@@ -1,13 +1,13 @@
 import { CopyAgentPrompt } from "./CopyAgentPrompt";
 
-const REPO_URL = "https://github.com/chen-rn/auto-wi2-captive-accept";
+const REPO_URL = "https://github.com/chen-rn/annoying-wifi";
 
 export default function Home() {
   return (
     <main className="page page-spec theme-divided">
       <article className="paper">
         <header className="paper-head">
-          <h1>wi2-auto-accept</h1>
+          <h1>annoying-wifi</h1>
           <span className="paper-meta">macOS · LaunchAgent · Playwright</span>
         </header>
 
@@ -55,7 +55,7 @@ export default function Home() {
               target="_blank"
               rel="noreferrer"
             >
-              github.com/chen-rn/auto-wi2-captive-accept
+              github.com/chen-rn/annoying-wifi
             </a>
           </span>
         </section>

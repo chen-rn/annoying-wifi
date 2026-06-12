@@ -1,5 +1,5 @@
 {
-  "name": "auto-wi2-captive-accept",
+  "name": "annoying-wifi",
   "version": "1.0.0",
   "private": true,
   "description": "macOS LaunchAgent scripts for accepting captive portals used by DOUTOR, Starbucks, and Tully's/USEN.",

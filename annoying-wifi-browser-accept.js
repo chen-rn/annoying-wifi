@@ -11,9 +11,9 @@ if (!url) {
 }
 
 const timeout = 20000;
-const defaultBirthYear = process.env.AUTO_WI2_BIRTH_YEAR || "1990";
-const defaultGender = process.env.AUTO_WI2_GENDER || "Male";
-const captureDir = process.env.AUTO_WI2_CAPTURE_DIR || "";
+const defaultBirthYear = process.env.ANNOYING_WIFI_BIRTH_YEAR || "1990";
+const defaultGender = process.env.ANNOYING_WIFI_GENDER || "Male";
+const captureDir = process.env.ANNOYING_WIFI_CAPTURE_DIR || "";
 
 function normalizeOptionText(text) {
   return String(text || "").trim().toLowerCase();

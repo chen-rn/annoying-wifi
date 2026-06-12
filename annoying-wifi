@@ -2,14 +2,14 @@
 set -euo pipefail
 
 PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-APP_DIR="${HOME}/.local/share/auto-wi2-captive-accept"
-CONFIG_FILE="${HOME}/.config/auto-wi2-captive-accept/config"
-LOG_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.log"
-STATUS_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.status"
-LAST_PORTAL_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.last-url"
-LAST_REFRESH_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.last-refresh"
-LAST_BROWSER_RESULT_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.last-browser-result.json"
-BROWSER_CAPTURE_DIR="${HOME}/Library/Logs/auto-wi2-captive-accept-captures"
+APP_DIR="${HOME}/.local/share/annoying-wifi"
+CONFIG_FILE="${HOME}/.config/annoying-wifi/config"
+LOG_FILE="${HOME}/Library/Logs/annoying-wifi.log"
+STATUS_FILE="${HOME}/Library/Logs/annoying-wifi.status"
+LAST_PORTAL_FILE="${HOME}/Library/Logs/annoying-wifi.last-url"
+LAST_REFRESH_FILE="${HOME}/Library/Logs/annoying-wifi.last-refresh"
+LAST_BROWSER_RESULT_FILE="${HOME}/Library/Logs/annoying-wifi.last-browser-result.json"
+BROWSER_CAPTURE_DIR="${HOME}/Library/Logs/annoying-wifi-captures"
 TARGET_SSIDS=("DOUTOR_FREE_Wi-Fi" "at_STARBUCKS_Wi2" "Wi2_Free" "Wi2free" "Wi2" "tullys_Wi-Fi")
 TARGET_HOSTS=("service.wi2.ne.jp" "10[.]1[.]1[.]100")
 CAPTIVE_CHECK_URL="http://captive.apple.com/hotspot-detect.html"
@@ -17,20 +17,20 @@ GENERAL_CHECK_URL="http://example.com/"
 GSTATIC_CHECK_URL="http://connectivitycheck.gstatic.com/generate_204"
 CAPTIVE_PROBE_URLS=("${CAPTIVE_CHECK_URL}" "${GENERAL_CHECK_URL}" "${GSTATIC_CHECK_URL}")
 DEFAULT_USEN_LOCAL_PORTAL="http://10.1.1.100:41873/captive/?url=captive.apple.com/hotspot-detect.html"
-BROWSER_ACCEPT_HELPER="${APP_DIR}/auto-wi2-browser-accept.js"
+BROWSER_ACCEPT_HELPER="${APP_DIR}/annoying-wifi-browser-accept.js"
 PORTAL_DETECTED=0
 PORTAL_LOCATION=""
 DIRECT_ACCEPTED=0
 REFRESHED_SAVED_LOGIN=0
 UNSUPPORTED_CAPTIVE=0
 BROWSER_RESULT="not_attempted"
-# Notifications are attributed to a tiny "Wi2 Auto-Connect.app" (built by install.sh)
+# Notifications are attributed to a tiny "Annoying WiFi.app" (built by install.sh)
 # so Notification Center shows a proper name + Wi-Fi icon instead of "terminal-notifier".
-NOTIFY_GROUP="wi2-auto-connect"
-NOTIFY_SENDER="com.${USER:-$(id -un)}.wi2autoconnect"
-# Click target for the latest notification. Wi2 Auto-Connect.app reads this on
+NOTIFY_GROUP="annoying-wifi-notifier"
+NOTIFY_SENDER="com.${USER:-$(id -un)}.annoyingwifi"
+# Click target for the latest notification. Annoying WiFi.app reads this on
 # launch (the notification click activates it) and opens the URL.
-CLICK_URL_FILE="${HOME}/Library/Logs/auto-wi2-captive-accept.click-url"
+CLICK_URL_FILE="${HOME}/Library/Logs/annoying-wifi.click-url"
 
 timestamp() {
   date "+%Y-%m-%d %H:%M:%S"
@@ -71,7 +71,7 @@ notify() {
   local detail="${2:-}"
   # Clicking the notification (or its "Show" button) opens this URL. Defaults to
   # the detected captive portal so the user can finish/inspect the sign-in by hand.
-  # The click activates Wi2 Auto-Connect.app, which opens whatever is recorded here.
+  # The click activates Annoying WiFi.app, which opens whatever is recorded here.
   local click_url="${3:-${PORTAL_LOCATION:-}}"
   local title body sound subtitle
   subtitle="${SSID:-}"
@@ -113,7 +113,7 @@ notify() {
 
 captive_check_success() {
   local body
-  body="$(mktemp -t auto-wi2-success.XXXXXX)"
+  body="$(mktemp -t annoying-wifi-success.XXXXXX)"
   if curl --silent --show-error --connect-timeout 3 --max-time 8 \
     --output "${body}" \
     "${CAPTIVE_CHECK_URL}" >/dev/null 2>&1 \
@@ -134,8 +134,8 @@ internet_probe_success() {
   local expected="$2"
   local headers body http_status
 
-  headers="$(mktemp -t auto-wi2-internet-headers.XXXXXX)"
-  body="$(mktemp -t auto-wi2-internet-body.XXXXXX)"
+  headers="$(mktemp -t annoying-wifi-internet-headers.XXXXXX)"
+  body="$(mktemp -t annoying-wifi-internet-body.XXXXXX)"
   if ! curl --silent --show-error --connect-timeout 3 --max-time 8 \
     --dump-header "${headers}" \
     --output "${body}" \
@@ -299,14 +299,14 @@ usen_direct_accept() {
   stamac="$(print -r -- "${location}" | sed -n 's/.*[?&]stamac=\([^&]*\).*/\1/p')"
   [[ -n "${stamac}" ]] || stamac="00:00:00:00:00:00"
 
-  birth_year="${AUTO_WI2_BIRTH_YEAR:-1990}"
+  birth_year="${ANNOYING_WIFI_BIRTH_YEAR:-1990}"
   if [[ ! "${birth_year}" =~ '^[0-9]{4}$' ]]; then
     birth_year="1990"
   fi
-  gender_value="$(normalize_usen_gender "${AUTO_WI2_GENDER:-Male}")"
+  gender_value="$(normalize_usen_gender "${ANNOYING_WIFI_GENDER:-Male}")"
 
   payload="{\"gender\":\"$(json_escape "${gender_value}")\",\"birth\":\"$(json_escape "${birth_year}")\",\"macaddr\":\"$(json_escape "${stamac}")\",\"lang\":\"en\"}"
-  response_file="$(mktemp -t auto-wi2-usen-api.XXXXXX)"
+  response_file="$(mktemp -t annoying-wifi-usen-api.XXXXXX)"
 
   http_code="$(curl --silent --show-error --connect-timeout 3 --max-time 10 \
     --output "${response_file}" \
@@ -362,8 +362,8 @@ open_native_portal() {
 
 open_portal_if_needed() {
   local response_headers response_body location pattern response_matches_target probe_url response_available saved_location
-  response_headers="$(mktemp -t auto-wi2-headers.XXXXXX)"
-  response_body="$(mktemp -t auto-wi2-body.XXXXXX)"
+  response_headers="$(mktemp -t annoying-wifi-headers.XXXXXX)"
+  response_body="$(mktemp -t annoying-wifi-body.XXXXXX)"
   pattern="$(target_regex)"
   location=""
   response_available=0
@@ -450,7 +450,7 @@ open_portal_if_needed() {
 
   if [[ -x "${BROWSER_ACCEPT_HELPER}" ]] && command -v node >/dev/null 2>&1; then
     mkdir -p "${BROWSER_CAPTURE_DIR}"
-    if browser_output="$(AUTO_WI2_CAPTURE_DIR="${BROWSER_CAPTURE_DIR}" node "${BROWSER_ACCEPT_HELPER}" "${location}" 2>&1)"; then
+    if browser_output="$(ANNOYING_WIFI_CAPTURE_DIR="${BROWSER_CAPTURE_DIR}" node "${BROWSER_ACCEPT_HELPER}" "${location}" 2>&1)"; then
       BROWSER_RESULT="clicked"
       print -r -- "${browser_output}" > "${LAST_BROWSER_RESULT_FILE}"
       sleep 3
@@ -480,9 +480,9 @@ open_portal_if_needed() {
   fi
 
   if [[ "${BROWSER_RESULT}" != "network_error" ]] && curl -L --silent --show-error --connect-timeout 3 --max-time 15 \
-    --cookie-jar /tmp/auto-wi2-cookies.txt \
-    --cookie /tmp/auto-wi2-cookies.txt \
-    --output /tmp/auto-wi2-direct-login.html \
+    --cookie-jar /tmp/annoying-wifi-cookies.txt \
+    --cookie /tmp/annoying-wifi-cookies.txt \
+    --output /tmp/annoying-wifi-direct-login.html \
     "${location}" >/dev/null 2>&1; then
     sleep 3
     if online_check_success; then
@@ -523,9 +523,9 @@ refresh_saved_login_if_due() {
   [[ "${age}" -ge 1500 ]] || return 0
 
   if curl -L --silent --show-error --connect-timeout 3 --max-time 12 \
-    --cookie-jar /tmp/auto-wi2-cookies.txt \
-    --cookie /tmp/auto-wi2-cookies.txt \
-    --output /tmp/auto-wi2-refresh.html \
+    --cookie-jar /tmp/annoying-wifi-cookies.txt \
+    --cookie /tmp/annoying-wifi-cookies.txt \
+    --output /tmp/annoying-wifi-refresh.html \
     "${location}" >/dev/null 2>&1; then
     print -r -- "${now}" > "${LAST_REFRESH_FILE}"
     REFRESHED_SAVED_LOGIN=1
@@ -537,9 +537,9 @@ refresh_saved_login_if_due() {
 SSID="$(current_ssid || true)"
 WIFI_IP="$(current_wifi_ip || true)"
 load_config
-AUTO_WI2_BIRTH_YEAR="${AUTO_WI2_BIRTH_YEAR:-1990}"
-AUTO_WI2_GENDER="${AUTO_WI2_GENDER:-Male}"
-export AUTO_WI2_BIRTH_YEAR AUTO_WI2_GENDER
+ANNOYING_WIFI_BIRTH_YEAR="${ANNOYING_WIFI_BIRTH_YEAR:-1990}"
+ANNOYING_WIFI_GENDER="${ANNOYING_WIFI_GENDER:-Male}"
+export ANNOYING_WIFI_BIRTH_YEAR ANNOYING_WIFI_GENDER
 
 if online_check_success; then
   refresh_saved_login_if_due || true
@@ -569,17 +569,17 @@ if ! wait_for_captive_window 20; then
   exit 0
 fi
 
-export AUTO_WI2_PORTAL_DETECTED="${PORTAL_DETECTED}"
-export AUTO_WI2_BROWSER_RESULT="${BROWSER_RESULT}"
-export AUTO_WI2_PORTAL_LOCATION="${PORTAL_LOCATION}"
+export ANNOYING_WIFI_PORTAL_DETECTED="${PORTAL_DETECTED}"
+export ANNOYING_WIFI_BROWSER_RESULT="${BROWSER_RESULT}"
+export ANNOYING_WIFI_PORTAL_LOCATION="${PORTAL_LOCATION}"
 if ! RESULT="$(osascript 2>&1 <<'APPLESCRIPT'
 set clicked to false
 set matched to false
-set portalWasDetected to ((system attribute "AUTO_WI2_PORTAL_DETECTED") is "1")
-set portalLocation to (system attribute "AUTO_WI2_PORTAL_LOCATION")
-set browserResult to (system attribute "AUTO_WI2_BROWSER_RESULT")
-set birthYear to (system attribute "AUTO_WI2_BIRTH_YEAR")
-set genderValue to (system attribute "AUTO_WI2_GENDER")
+set portalWasDetected to ((system attribute "ANNOYING_WIFI_PORTAL_DETECTED") is "1")
+set portalLocation to (system attribute "ANNOYING_WIFI_PORTAL_LOCATION")
+set browserResult to (system attribute "ANNOYING_WIFI_BROWSER_RESULT")
+set birthYear to (system attribute "ANNOYING_WIFI_BIRTH_YEAR")
+set genderValue to (system attribute "ANNOYING_WIFI_GENDER")
 if birthYear is missing value or birthYear is "" then set birthYear to "1990"
 if genderValue is missing value or genderValue is "" then set genderValue to "Male"
 set usenNativeFlow to false
