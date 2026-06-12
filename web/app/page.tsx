@@ -13,15 +13,15 @@ export default function Home() {
 
         <section className="paper-body">
           <p>
-            Wi2 captive portals used by Starbucks, DOUTOR, and Tully&apos;s/USEN
-            can kick you back to an accept screen. This is a small background
-            script that clears the portal for you, so the disconnect is
+            You know how cafe Wi-Fi makes you re-accept the same permission
+            screen every hour or so? This does it for you with a small
+            background script that clears the portal, so the disconnect is
             invisible.
           </p>
           <p>
-            It runs every 30 seconds, detects the portal via Apple&apos;s
-            hotspot probe, and uses a headless Chromium or local portal API to
-            tap the right buttons.
+            It checks every 30 seconds, notices the Starbucks, DOUTOR, and
+            Tully&apos;s/USEN portals through Apple&apos;s hotspot probe, then taps
+            the right buttons with headless Chromium or the local portal API.
           </p>
         </section>
 

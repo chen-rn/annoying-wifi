@@ -12,7 +12,7 @@ const AGENT_PROMPT = `Install annoying-wifi on this Mac.
    And tail the status:
      cat "$HOME/Library/Logs/annoying-wifi.status"
 
-It runs every 30 seconds, detects Wi2 captive portals used by DOUTOR, Starbucks, and Tully's/USEN, and auto-accepts them with headless Chromium or the local portal API. Supported SSIDs: DOUTOR_FREE_Wi-Fi, at_STARBUCKS_Wi2, Wi2_Free, Wi2free, Wi2, and tullys_Wi-Fi.`;
+Cafe Wi-Fi sometimes makes you re-accept the same permission screen every hour or so. This runs every 30 seconds, detects the DOUTOR, Starbucks, and Tully's/USEN portals, and auto-accepts them with headless Chromium or the local portal API. Supported SSIDs: DOUTOR_FREE_Wi-Fi, at_STARBUCKS_Wi2, Wi2_Free, Wi2free, Wi2, and tullys_Wi-Fi.`;
 
 type Props = {
   children: React.ReactNode;
