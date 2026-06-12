@@ -34,25 +34,10 @@ export default function Home() {
             the right buttons with headless Chromium or the local portal API.
           </p>
           <p>
-            Source lives at{" "}
-            <a
-              className="inline-link"
-              href={REPO_URL}
-              target="_blank"
-              rel="noreferrer"
-            >
-              github.com/chen-rn/annoying-wifi
-            </a>
-            . Stuck on another network?{" "}
-            <a
-              className="inline-link"
-              href={REPO_URL}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Send a PR
-            </a>
-            .
+            <CopyAgentPrompt className="inline-link" copiedLabel="Copied">
+              Click here
+            </CopyAgentPrompt>{" "}
+            to copy the prompt to pass to your agent.
           </p>
         </section>
 
