@@ -8,7 +8,17 @@ export default function Home() {
       <article className="paper">
         <header className="paper-head">
           <h1>annoying-wifi</h1>
-          <span className="paper-meta">macOS · LaunchAgent · Playwright</span>
+          <span className="paper-meta">
+            macOS ·{" "}
+            <a
+              className="inline-link"
+              href={REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              github
+            </a>
+          </span>
         </header>
 
         <section className="paper-body">
@@ -22,6 +32,27 @@ export default function Home() {
             It checks every 30 seconds, notices the Starbucks, DOUTOR, and
             Tully&apos;s/USEN portals through Apple&apos;s hotspot probe, then taps
             the right buttons with headless Chromium or the local portal API.
+          </p>
+          <p>
+            Source lives at{" "}
+            <a
+              className="inline-link"
+              href={REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              github.com/chen-rn/annoying-wifi
+            </a>
+            . Stuck on another network?{" "}
+            <a
+              className="inline-link"
+              href={REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Send a PR
+            </a>
+            .
           </p>
         </section>
 
@@ -43,35 +74,6 @@ export default function Home() {
             <CopyAgentPrompt className="inline-link" copiedLabel="Copied">
               copy prompt for your agent
             </CopyAgentPrompt>
-          </span>
-        </section>
-
-        <section className="paper-row">
-          <span className="row-key">source</span>
-          <span className="row-val">
-            <a
-              className="inline-link"
-              href={REPO_URL}
-              target="_blank"
-              rel="noreferrer"
-            >
-              github.com/chen-rn/annoying-wifi
-            </a>
-          </span>
-        </section>
-
-        <section className="paper-row">
-          <span className="row-key">contribute</span>
-          <span className="row-val">
-            another network?{" "}
-            <a
-              className="inline-link"
-              href={REPO_URL}
-              target="_blank"
-              rel="noreferrer"
-            >
-              send a PR
-            </a>
           </span>
         </section>
       </article>
